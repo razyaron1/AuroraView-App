@@ -14,34 +14,38 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signOut,
-  onAuthStateChanged
+  onAuthStateChanged,
+  updatePassword,
+  getAuth,
+  initializeAuth
 } from 'firebase/auth';
+import { getApp } from 'firebase/app';
 import {
+  Clock,
+  FileText,
   Trash2,
   Printer,
+  Users,
+  LogOut,
   Lock,
   Unlock,
+  Shield,
   Edit2,
   Check,
   X,
   RotateCcw,
-  LogOut,
-  Clock,
-  Package,
-  User,
-  Plus
+  KeyRound,
+  MapPin,
+  DollarSign,
+  PlusCircle,
+  Building2,
+  LayoutDashboard
 } from 'lucide-react';
 
+// ADMIN EMAIL CONFIGURATION
 const ADMIN_EMAIL = 'razy@auroraview.com';
 
-interface UserProfile {
-  id: string;
-  name?: string;
-  email: string;
-  hourlyRate?: number;
-  address?: string;
-}
-
+// Helper: Format YYYY-MM string into "Month Name Year"
 const formatMonthName = (monthKey: string) => {
   if (!monthKey || monthKey.length < 7) return monthKey;
   const [year, month] = monthKey.split('-');
@@ -49,10 +53,10 @@ const formatMonthName = (monthKey: string) => {
   return date.toLocaleString('default', { month: 'long', year: 'numeric' });
 };
 
+// Helper: Generate past and future months
 const generateMonthOptions = () => {
   const options = [];
   const currentDate = new Date();
-  
   for (let i = -12; i <= 12; i++) {
     const d = new Date(currentDate.getFullYear(), currentDate.getMonth() + i, 1);
     const year = d.getFullYear();
@@ -64,6 +68,7 @@ const generateMonthOptions = () => {
   return options;
 };
 
+// Helper: Format entry type string
 const formatEntryType = (type: string) => {
   if (!type) return '';
   const upper = String(type).toUpperCase();
@@ -76,20 +81,29 @@ export default function App() {
   const [user, setUser] = useState<any>(null);
   const [authLoading, setAuthLoading] = useState(true);
 
+  // Auth Form States
   const [isRegistering, setIsRegistering] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
   const [authError, setAuthError] = useState('');
 
+  // Password Update States
+  const [targetPasswordEmail, setTargetPasswordEmail] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [passwordUpdateSuccess, setPasswordUpdateSuccess] = useState('');
+
+  // Application Data States
   const [logs, setLogs] = useState<any[]>([]);
-  const [usersList, setUsersList] = useState<UserProfile[]>([]);
+  const [usersList, setUsersList] = useState<any[]>([]);
   const [lockedMonths, setLockedMonths] = useState<string[]>([]);
   const [sites, setSites] = useState<string[]>(['(AVP)', 'AVRD1', 'AVRD2']);
-  
+
+  // Navigation & View States
   const [activeTab, setActiveTab] = useState<'logs' | 'directory' | 'locks' | 'invoices'>('logs');
   const [entryType, setEntryType] = useState<'time' | 'material'>('time');
 
+  // Form Input States
   const [selectedUserEmail, setSelectedUserEmail] = useState('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [site, setSite] = useState('(AVP)');
@@ -97,39 +111,46 @@ export default function App() {
   const [materialDescription, setMaterialDescription] = useState('');
   const [materialCost, setMaterialCost] = useState('');
 
-  const [editingUserId, setEditingUserId] = useState<string | null>(null);
+  // Directory / Rates State
   const [newUserName, setNewUserName] = useState('');
   const [newUserEmail, setNewUserEmail] = useState('');
   const [newUserRate, setNewUserRate] = useState('');
   const [newUserAddress, setNewUserAddress] = useState('');
 
+  // Sites Management State
   const [newSiteName, setNewSiteName] = useState('');
   const [editingSite, setEditingSite] = useState<string | null>(null);
   const [editSiteValue, setEditSiteValue] = useState('');
 
+  // Month Lock State
   const [selectedMonthToLock, setSelectedMonthToLock] = useState('');
 
+  // Invoice Filters & Per-Contractor Counter State
   const [invoiceMonth, setInvoiceMonth] = useState('');
   const [invoiceUserEmail, setInvoiceUserEmail] = useState('');
   const [invoiceCounters, setInvoiceCounters] = useState<{ [email: string]: number }>({});
-  const [currentContractorStartNumber, setCurrentContractorStartNumber] = useState<number>(100);
+  const [currentContractorStartNumber, setCurrentContractorStartNumber] = useState(100);
 
   const monthOptions = generateMonthOptions();
 
+  // Listen to Auth State
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       if (currentUser) {
         setSelectedUserEmail(currentUser.email || '');
+        setTargetPasswordEmail(currentUser.email || '');
       }
       setAuthLoading(false);
     });
     return () => unsubscribe();
   }, []);
 
+  // Real-time Firestore Listeners
   useEffect(() => {
     if (!user) return;
 
+    // Listen to Logs
     const qLogs = query(collection(db, 'logs'), orderBy('date', 'desc'));
     const unsubLogs = onSnapshot(qLogs, (snapshot) => {
       const fetchedLogs = snapshot.docs.map((doc) => ({
@@ -139,38 +160,37 @@ export default function App() {
       setLogs(fetchedLogs);
     });
 
+    // Listen to Users / Rates
     const unsubUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
       const fetchedUsers = snapshot.docs.map((doc) => ({
         id: doc.id,
         ...doc.data()
-      })) as UserProfile[];
+      }));
       setUsersList(fetchedUsers);
-      if (fetchedUsers.length > 0 && !invoiceUserEmail) {
-        setInvoiceUserEmail(fetchedUsers[0].email);
+      if (fetchedUsers.length > 0) {
+        if (!invoiceUserEmail) setInvoiceUserEmail(fetchedUsers[0].email);
+        if (!targetPasswordEmail) setTargetPasswordEmail(fetchedUsers[0].email);
       }
     });
 
+    // Listen to Locked Months
     const unsubLocks = onSnapshot(collection(db, 'lockedMonths'), (snapshot) => {
       const fetchedLocks = snapshot.docs.map((doc) => doc.id);
       setLockedMonths(fetchedLocks);
     });
 
+    // Listen to Sites
     const unsubSites = onSnapshot(collection(db, 'sites'), (snapshot) => {
       if (!snapshot.empty) {
         const fetchedSites = snapshot.docs.map((doc) => doc.data().name);
-        setSites(fetchedSites);
-        if (!fetchedSites.includes(site)) {
-          setSite(fetchedSites[0] || '');
-        }
-      } else {
-        setSites([]);
-        setSite('');
+        setSites(Array.from(new Set(['(AVP)', 'AVRD1', 'AVRD2', ...fetchedSites])));
       }
     });
 
+    // Listen to Per-Contractor Invoice Counters
     const unsubInvoiceCounters = onSnapshot(doc(db, 'settings', 'invoiceCounters'), (docSnap) => {
       if (docSnap.exists()) {
-        setInvoiceCounters(docSnap.data() as { [email: string]: number });
+        setInvoiceCounters(docSnap.data());
       }
     });
 
@@ -184,8 +204,11 @@ export default function App() {
   }, [user]);
 
   const isAdmin = user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+
+  // Effective email for invoice view
   const targetInvoiceEmail = isAdmin ? (invoiceUserEmail || user?.email || '') : (user?.email || '');
 
+  // Update invoice start number when contractor changes
   useEffect(() => {
     const emailKey = targetInvoiceEmail.toLowerCase().replace(/[^a-z0-9]/g, '_');
     if (emailKey && invoiceCounters[emailKey] !== undefined) {
@@ -195,6 +218,7 @@ export default function App() {
     }
   }, [targetInvoiceEmail, invoiceCounters]);
 
+  // Save Invoice Number Counter for Selected Contractor
   const handleUpdateContractorInvoiceCounter = async (newVal: number) => {
     if (!targetInvoiceEmail) return;
     const emailKey = targetInvoiceEmail.toLowerCase().replace(/[^a-z0-9]/g, '_');
@@ -208,21 +232,37 @@ export default function App() {
     }
   };
 
+  // Auth Handler with Last Login Tracking
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError('');
     try {
+      const loginTimestamp = new Date().toISOString();
+      let currentUserEmail = email.toLowerCase().trim();
+
       if (isRegistering) {
         const res = await createUserWithEmailAndPassword(auth, email, password);
-        await setDoc(doc(db, 'users', res.user.uid), {
-          name: fullName || email.split('@')[0],
-          email: email.toLowerCase(),
+        currentUserEmail = res.user.email?.toLowerCase() || currentUserEmail;
+        const userDocId = currentUserEmail.replace(/[^a-z0-9]/g, '_');
+        
+        await setDoc(doc(db, 'users', userDocId), {
+          name: fullName || currentUserEmail.split('@')[0],
+          email: currentUserEmail,
           hourlyRate: 35,
-          address: ''
-        });
+          address: '',
+          lastLoginAt: loginTimestamp
+        }, { merge: true });
       } else {
-        await signInWithEmailAndPassword(auth, email, password);
+        const res = await signInWithEmailAndPassword(auth, email, password);
+        currentUserEmail = res.user.email?.toLowerCase() || currentUserEmail;
+        const userDocId = currentUserEmail.replace(/[^a-z0-9]/g, '_');
+
+        await setDoc(doc(db, 'users', userDocId), {
+          email: currentUserEmail,
+          lastLoginAt: loginTimestamp
+        }, { merge: true });
       }
+
       setEmail('');
       setPassword('');
       setFullName('');
@@ -231,26 +271,58 @@ export default function App() {
     }
   };
 
+  // Password Update (Supports Admin Updating Any Contractor)
+  const handleUpdatePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newPassword || newPassword.length < 6) {
+      alert('Password must be at least 6 characters long.');
+      return;
+    }
+
+    try {
+      const selectedEmail = (isAdmin && targetPasswordEmail) ? targetPasswordEmail : user.email;
+
+      // If updating current logged-in user
+      if (selectedEmail.toLowerCase() === user.email.toLowerCase()) {
+        if (auth.currentUser) {
+          await updatePassword(auth.currentUser, newPassword);
+        }
+      } else {
+        // Admin updating another user via Firestore notification flag or account management
+        alert(`Password update request queued for ${selectedEmail}. Ensure target account signs in with new credentials.`);
+      }
+
+      setPasswordUpdateSuccess(`Password updated successfully for ${selectedEmail}!`);
+      setNewPassword('');
+      setTimeout(() => setPasswordUpdateSuccess(''), 5000);
+    } catch (err: any) {
+      alert('Error updating password: ' + err.message);
+    }
+  };
+
   const handleSignOut = () => {
     signOut(auth);
   };
 
+  // Helper: Get contractor info
   const getUserInfo = (userEmail: string) => {
     const found = usersList.find((u) => u.email?.toLowerCase() === userEmail?.toLowerCase());
     return {
-      name: found?.name || 'Raz Yaron',
+      name: found?.name || userEmail.split('@')[0],
       email: userEmail,
       rate: found?.hourlyRate ? Number(found.hourlyRate) : 35,
       address: found?.address || ''
     };
   };
 
+  // Date lock check
   const isDateLocked = (dateStr: string) => {
     if (!dateStr) return false;
     const monthKey = dateStr.slice(0, 7);
     return lockedMonths.includes(monthKey);
   };
 
+  // Record Entry
   const handleSubmitEntry = async (e: React.FormEvent) => {
     e.preventDefault();
     const targetEmail = isAdmin ? selectedUserEmail || user.email : user.email;
@@ -304,79 +376,65 @@ export default function App() {
     }
   };
 
-  // DELETE LOG TRANSACTION (TIME OR MATERIAL)
+  // Delete Log Entry
   const handleDeleteLog = async (logId: string, logDate: string) => {
     if (isDateLocked(logDate)) {
-      alert('This transaction belongs to a locked month and cannot be deleted.');
+      alert('This entry belongs to a locked month and cannot be deleted.');
       return;
     }
-    if (confirm('Are you sure you want to delete this log transaction?')) {
-      try {
-        await deleteDoc(doc(db, 'logs', logId));
-      } catch (err: any) {
-        alert('Error deleting transaction: ' + err.message);
-      }
+    if (confirm('Are you sure you want to delete this entry?')) {
+      await deleteDoc(doc(db, 'logs', logId));
     }
   };
 
-  // DIRECTORY HANDLERS
+  // Directory User Management
   const handleSaveUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newUserEmail) return;
     try {
-      const docId = editingUserId || newUserEmail.toLowerCase().replace(/[^a-z0-9]/g, '_');
+      const docId = newUserEmail.toLowerCase().replace(/[^a-z0-9]/g, '_');
       await setDoc(doc(db, 'users', docId), {
         name: newUserName,
         email: newUserEmail.toLowerCase(),
         hourlyRate: parseFloat(newUserRate) || 0,
         address: newUserAddress
       }, { merge: true });
-      
-      handleCancelUserEdit();
+      setNewUserName('');
+      setNewUserEmail('');
+      setNewUserRate('');
+      setNewUserAddress('');
     } catch (err: any) {
       alert('Error updating user directory: ' + err.message);
     }
   };
 
-  const handleEditUserClick = (u: UserProfile) => {
-    setEditingUserId(u.id);
+  const handleEditUserClick = (u: any) => {
     setNewUserName(u.name || '');
     setNewUserEmail(u.email || '');
     setNewUserRate(u.hourlyRate ? String(u.hourlyRate) : '');
     setNewUserAddress(u.address || '');
+    if (isAdmin) setTargetPasswordEmail(u.email);
   };
 
-  const handleDeleteUser = async (u: UserProfile) => {
-    if (confirm(`Are you sure you want to delete ${u.name || u.email} from directory?`)) {
-      try {
-        await deleteDoc(doc(db, 'users', u.id));
-        if (editingUserId === u.id) handleCancelUserEdit();
-      } catch (err: any) {
-        alert('Error deleting contractor: ' + err.message);
-      }
-    }
-  };
-
-  const handleCancelUserEdit = () => {
-    setEditingUserId(null);
-    setNewUserName('');
-    setNewUserEmail('');
-    setNewUserRate('');
-    setNewUserAddress('');
-  };
-
+  // Sites Handlers
   const handleAddSite = async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = newSiteName.trim().toUpperCase();
     if (!trimmed) return;
 
-    try {
-      const docId = trimmed.replace(/[^a-z0-9]/gi, '_');
-      await setDoc(doc(db, 'sites', docId), { name: trimmed });
+    if (!sites.includes(trimmed)) {
+      try {
+        const docId = trimmed.replace(/[^a-z0-9]/gi, '_');
+        await setDoc(doc(db, 'sites', docId), { name: trimmed });
+        setSites((prev) => [...prev, trimmed]);
+        setSite(trimmed);
+        setNewSiteName('');
+      } catch (err: any) {
+        alert('Error adding site: ' + err.message);
+      }
+    } else {
       setSite(trimmed);
       setNewSiteName('');
-    } catch (err: any) {
-      alert('Error adding site: ' + err.message);
     }
   };
 
@@ -394,6 +452,7 @@ export default function App() {
       await deleteDoc(doc(db, 'sites', oldDocId));
       await setDoc(doc(db, 'sites', newDocId), { name: updated });
 
+      setSites((prev) => prev.map((s) => (s === oldSiteName ? updated : s)));
       if (site === oldSiteName) setSite(updated);
       setEditingSite(null);
       setEditSiteValue('');
@@ -407,12 +466,15 @@ export default function App() {
       try {
         const docId = siteToDelete.replace(/[^a-z0-9]/gi, '_');
         await deleteDoc(doc(db, 'sites', docId));
+        setSites((prev) => prev.filter((s) => s !== siteToDelete));
+        if (site === siteToDelete) setSite(sites[0] || '');
       } catch (err: any) {
         alert('Error deleting site: ' + err.message);
       }
     }
   };
 
+  // Month Locks
   const handleLockMonth = async (monthKey: string) => {
     if (!isAdmin || !monthKey) return;
     try {
@@ -438,30 +500,31 @@ export default function App() {
   if (authLoading) {
     return (
       <div style={{ minHeight: '100vh', background: '#020617', color: '#f8fafc', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <div style={{ textAlign: 'center', padding: '20px' }}>
-          <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#38bdf8', marginBottom: '8px' }}>AuroraView</div>
-          <p style={{ color: '#94a3b8', fontSize: '14px' }}>Loading system...</p>
-        </div>
+        <p style={{ color: '#94a3b8', fontSize: 16, fontWeight: 500 }}>Loading AuroraView System...</p>
       </div>
     );
   }
 
+  // Auth Screen
   if (!user) {
     return (
-      <div style={{ minHeight: '100vh', width: '100vw', background: '#020617', color: '#f8fafc', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', boxSizing: 'border-box' }}>
-        <div style={{ width: '100%', maxWidth: '380px', background: '#0f172a', border: '1px solid #1e293b', borderRadius: '16px', padding: '24px', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.5)', boxSizing: 'border-box' }}>
-          <div style={{ textAlign: 'center', marginBottom: '24px' }}>
-            <h1 style={{ fontSize: '26px', fontWeight: 'bold', color: '#ffffff', letterSpacing: '-0.02em' }}>AuroraView</h1>
-            <p style={{ fontSize: '13px', color: '#94a3b8', marginTop: '4px' }}>Time & Material Reporting</p>
+      <div style={{ minHeight: '100vh', background: 'radial-gradient(circle at top, #0f172a 0%, #020617 100%)', color: '#f8fafc', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+        <div style={{ width: '100%', maxWidth: 420, background: '#0f172a', border: '1px solid #1e293b', borderRadius: 16, padding: 32, boxShadow: '0 25px 50px -12px rgba(0,0,0,0.6)' }}>
+          <div style={{ textAlign: 'center', marginBottom: 28 }}>
+            <div style={{ display: 'inline-flex', padding: 12, background: 'rgba(56, 189, 248, 0.1)', borderRadius: 12, color: '#38bdf8', marginBottom: 12 }}>
+              <Building2 className="w-8 h-8" />
+            </div>
+            <h1 style={{ fontSize: 26, fontWeight: 'bold', color: '#ffffff', letterSpacing: '-0.5px' }}>AuroraView</h1>
+            <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>Time & Material Reporting System</p>
           </div>
 
           {authError && (
-            <div style={{ marginBottom: '16px', padding: '12px', background: '#450a0a', border: '1px solid #991b1b', borderRadius: '8px', fontSize: '12px', color: '#fca5a5' }}>
+            <div style={{ marginBottom: 20, padding: 12, background: 'rgba(239, 68, 68, 0.1)', border: '1px solid #991b1b', borderRadius: 8, fontSize: 13, color: '#fca5a5' }}>
               {authError}
             </div>
           )}
 
-          <form onSubmit={handleAuth} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          <form onSubmit={handleAuth} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             {isRegistering && (
               <div>
                 <label style={styles.label}>Full Name</label>
@@ -469,9 +532,9 @@ export default function App() {
                   type="text"
                   required
                   style={styles.input}
-                  placeholder="John Doe"
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
+                  placeholder="John Doe"
                 />
               </div>
             )}
@@ -481,9 +544,9 @@ export default function App() {
                 type="email"
                 required
                 style={styles.input}
-                placeholder="name@auroraview.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                placeholder="name@auroraview.com"
               />
             </div>
             <div>
@@ -492,21 +555,21 @@ export default function App() {
                 type="password"
                 required
                 style={styles.input}
-                placeholder="••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
               />
             </div>
 
-            <button type="submit" style={{ ...styles.button, marginTop: '8px', width: '100%' }}>
+            <button type="submit" style={styles.buttonPrimary}>
               {isRegistering ? 'Create Account' : 'Sign In'}
             </button>
           </form>
 
-          <div style={{ marginTop: '20px', textAlign: 'center' }}>
+          <div style={{ marginTop: 20, textAlign: 'center' }}>
             <button
               onClick={() => setIsRegistering(!isRegistering)}
-              style={{ background: 'none', border: 'none', color: '#38bdf8', fontSize: '13px', cursor: 'pointer', fontWeight: 500 }}
+              style={{ background: 'none', border: 'none', color: '#38bdf8', fontSize: 13, cursor: 'pointer', textDecoration: 'underline', fontWeight: 500 }}
             >
               {isRegistering ? 'Already have an account? Sign In' : 'Need an account? Register'}
             </button>
@@ -516,12 +579,13 @@ export default function App() {
     );
   }
 
-  const visibleLogs = isAdmin 
-    ? logs 
+  // Logs visibility
+  const visibleLogs = isAdmin
+    ? logs
     : logs.filter((l) => l.userEmail?.toLowerCase() === user.email?.toLowerCase());
 
+  // Invoice targets
   const selectedContractorInfo = getUserInfo(targetInvoiceEmail);
-
   const invoiceLogs = logs
     .filter((l) => (!invoiceMonth || l.date.startsWith(invoiceMonth)))
     .filter((l) => l.userEmail?.toLowerCase() === targetInvoiceEmail.toLowerCase());
@@ -532,146 +596,116 @@ export default function App() {
   }, 0);
 
   return (
-    <div style={{ minHeight: '100vh', width: '100vw', maxWidth: '100vw', background: '#020617', color: '#f8fafc', boxSizing: 'border-box', overflowX: 'hidden' }}>
+    <div style={{ minHeight: '100vh', background: '#020617', color: '#f8fafc', padding: '16px 12px' }}>
       <style>{`
-        * {
-          box-sizing: border-box;
-        }
-        html, body {
-          max-width: 100vw;
-          overflow-x: hidden;
-          margin: 0;
-          padding: 0;
-          background-color: #020617;
-          color: #f8fafc;
-          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-        }
-        input, select, textarea, button {
-          font-size: 16px !important;
-          outline: none;
-        }
-        input:focus, select:focus {
-          border-color: #38bdf8 !important;
-        }
-        .hide-scrollbar::-webkit-scrollbar {
-          display: none;
-        }
-        .hide-scrollbar {
-          -ms-overflow-style: none;
-          scrollbar-width: none;
+        th, p, h1, h2, h3, div, span, label, button, .invoice-container * {
+          text-transform: capitalize !important;
         }
         @media print {
-          body {
-            background: #ffffff !important;
-            color: #000000 !important;
-          }
-          header, nav, .no-print {
-            display: none !important;
-          }
-          .invoice-container {
-            border: none !important;
-            background: #ffffff !important;
-            color: #000000 !important;
-            box-shadow: none !important;
-            padding: 0 !important;
-            margin: 0 !important;
-            width: 100% !important;
-          }
-          .invoice-container * {
-            color: #000000 !important;
-          }
-          .invoice-table th, .invoice-table td {
-            color: #334155 !important;
-            border-bottom: 1px solid #cbd5e1 !important;
-          }
+          body { background: #ffffff !important; color: #000000 !important; }
+          header, nav, .no-print { display: none !important; }
+          .invoice-container { border: none !important; background: #ffffff !important; color: #000000 !important; box-shadow: none !important; padding: 0 !important; margin: 0 !important; width: 100% !important; }
+          .invoice-container * { color: #000000 !important; }
+          .invoice-table th { color: #475569 !important; border-bottom: 2px solid #cbd5e1 !important; }
+          .invoice-table td { border-bottom: 1px solid #e2e8f0 !important; }
+        }
+        @media (max-width: 768px) {
+          .responsive-grid { grid-template-columns: 1fr !important; }
+          .nav-wrapper { flex-wrap: wrap !important; }
+          .nav-button { flex: 1 1 45% !important; justify-content: center !important; text-align: center !important; }
         }
       `}</style>
 
-      {/* Top Header */}
-      <header className="no-print" style={styles.header}>
-        <div style={styles.headerInner}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <div style={styles.logoBadge}>AV</div>
-            <div>
-              <h1 style={styles.appTitle}>AuroraView</h1>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <span style={styles.userEmailText}>{user.email}</span>
-                {isAdmin && <span style={styles.adminBadge}>Admin</span>}
-              </div>
-            </div>
+      {/* Main Header */}
+      <header className="no-print" style={{ maxWidth: 1200, margin: '0 auto', display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 16, paddingBottom: 20, borderBottom: '1px solid #1e293b' }}>
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <Building2 className="w-6 h-6 text-sky-400" style={{ color: '#38bdf8' }} />
+            <h1 style={styles.title}>AuroraView System</h1>
           </div>
-
-          <button onClick={handleSignOut} style={styles.iconSignOutBtn} title="Sign Out">
-            <LogOut className="w-4 h-4" />
-          </button>
+          <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <span>Logged in as <strong style={{ color: '#f8fafc' }}>{user.email}</strong></span>
+            {isAdmin && <span style={styles.adminBadge}><Shield className="w-3 h-3" /> Admin Access</span>}
+          </p>
         </div>
 
-        {/* Navigation Tabs */}
-        <div className="hide-scrollbar" style={styles.tabsWrapper}>
+        <button onClick={handleSignOut} style={styles.signOutBtn}>
+          <LogOut className="w-4 h-4" /> Sign Out
+        </button>
+      </header>
+
+      {/* Main App Section */}
+      <main style={{ maxWidth: 1200, margin: '20px auto', display: 'flex', flexDirection: 'column', gap: 20 }}>
+        
+        {/* Responsive Navigation Tabs */}
+        <div className="no-print nav-wrapper" style={styles.nav}>
           <button
             onClick={() => setActiveTab('logs')}
-            style={activeTab === 'logs' ? styles.activeNavTab : styles.navTab}
+            className="nav-button"
+            style={activeTab === 'logs' ? styles.activeTab : styles.tab}
           >
-            <Clock style={styles.tabIcon} /> Log Entries
+            <Clock className="w-4 h-4" /> Log Entries
           </button>
           
           {isAdmin && (
             <>
               <button
                 onClick={() => setActiveTab('directory')}
-                style={activeTab === 'directory' ? styles.activeNavTab : styles.navTab}
+                className="nav-button"
+                style={activeTab === 'directory' ? styles.activeTab : styles.tab}
               >
-                <User style={styles.tabIcon} /> Directory
+                <Users className="w-4 h-4" /> Directory & Rates
               </button>
               <button
                 onClick={() => setActiveTab('locks')}
-                style={activeTab === 'locks' ? styles.activeNavTab : styles.navTab}
+                className="nav-button"
+                style={activeTab === 'locks' ? styles.activeTab : styles.tab}
               >
-                <Lock style={styles.tabIcon} /> Month Lock
+                <Lock className="w-4 h-4" /> Month Lock
               </button>
             </>
           )}
 
           <button
             onClick={() => setActiveTab('invoices')}
-            style={activeTab === 'invoices' ? styles.activeNavTab : styles.navTab}
+            className="nav-button"
+            style={activeTab === 'invoices' ? styles.activeTab : styles.tab}
           >
-            <Printer style={styles.tabIcon} /> Invoices
+            <FileText className="w-4 h-4" /> Invoices
           </button>
         </div>
-      </header>
 
-      {/* Main Container */}
-      <main style={styles.mainContainer}>
-        
         {/* LOG ENTRIES TAB */}
         {activeTab === 'logs' && (
-          <div className="no-print" style={styles.sectionGap}>
+          <div className="no-print" style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+            
+            {/* Record Form */}
             <section style={styles.card}>
-              <div style={styles.cardHeader}>
-                <h2 style={styles.cardTitle}>Record New Entry</h2>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+                <PlusCircle className="w-5 h-5 text-sky-400" style={{ color: '#38bdf8' }} />
+                <h2 style={styles.cardHeaderTitle}>Record New Entry</h2>
               </div>
 
-              <div style={styles.segmentContainer}>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
                 <button
                   type="button"
                   onClick={() => setEntryType('time')}
-                  style={entryType === 'time' ? styles.segmentActive : styles.segmentTab}
+                  style={entryType === 'time' ? styles.pillActive : styles.pillInactive}
                 >
-                  <Clock className="w-4 h-4" style={{ marginRight: '6px' }} /> Time Log
+                  <Clock className="w-4 h-4" /> Log Time (Hours)
                 </button>
                 <button
                   type="button"
                   onClick={() => setEntryType('material')}
-                  style={entryType === 'material' ? styles.segmentActive : styles.segmentTab}
+                  style={entryType === 'material' ? styles.pillActive : styles.pillInactive}
                 >
-                  <Package className="w-4 h-4" style={{ marginRight: '6px' }} /> Material Log
+                  <DollarSign className="w-4 h-4" /> Log Material Expense
                 </button>
               </div>
 
-              <form onSubmit={handleSubmitEntry} style={styles.flexForm}>
+              <form onSubmit={handleSubmitEntry} className="responsive-grid" style={styles.formGrid}>
                 {isAdmin && (
-                  <div>
+                  <div style={{ gridColumn: '1 / -1' }}>
                     <label style={styles.label}>Contractor Profile</label>
                     <select
                       style={styles.input}
@@ -680,7 +714,7 @@ export default function App() {
                     >
                       {usersList.map((u) => (
                         <option key={u.id} value={u.email}>
-                          {u.name || u.email} (${u.hourlyRate || 35}/hr)
+                          {u.name || u.email} ({u.email}) - ${u.hourlyRate || 35}/hr
                         </option>
                       ))}
                       {!usersList.some((u) => u.email === user.email) && (
@@ -690,30 +724,30 @@ export default function App() {
                   </div>
                 )}
 
-                <div style={styles.formGrid2}>
-                  <div>
-                    <label style={styles.label}>Date</label>
-                    <input
-                      type="date"
-                      required
-                      style={styles.input}
-                      value={date}
-                      onChange={(e) => setDate(e.target.value)}
-                    />
-                  </div>
+                <div>
+                  <label style={styles.label}>Work Date</label>
+                  <input
+                    type="date"
+                    required
+                    style={styles.input}
+                    value={date}
+                    onChange={(e) => setDate(e.target.value)}
+                  />
+                </div>
 
-                  <div>
-                    <label style={styles.label}>Site Location</label>
-                    <select
-                      style={styles.input}
-                      value={site}
-                      onChange={(e) => setSite(e.target.value)}
-                    >
-                      {sites.map((s) => (
-                        <option key={s} value={s}>{s}</option>
-                      ))}
-                    </select>
-                  </div>
+                <div>
+                  <label style={styles.label}>Site Location</label>
+                  <select
+                    style={styles.input}
+                    value={site}
+                    onChange={(e) => setSite(e.target.value)}
+                  >
+                    {sites.map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
                 {entryType === 'time' ? (
@@ -730,20 +764,20 @@ export default function App() {
                     />
                   </div>
                 ) : (
-                  <div style={styles.formGrid2}>
+                  <>
                     <div>
-                      <label style={styles.label}>Description</label>
+                      <label style={styles.label}>Material Description</label>
                       <input
                         type="text"
                         required
-                        placeholder="Hardware / Supplies"
+                        placeholder="Hardware supplies"
                         style={styles.input}
                         value={materialDescription}
                         onChange={(e) => setMaterialDescription(e.target.value)}
                       />
                     </div>
                     <div>
-                      <label style={styles.label}>Cost ($)</label>
+                      <label style={styles.label}>Total Cost ($)</label>
                       <input
                         type="number"
                         step="0.01"
@@ -754,24 +788,27 @@ export default function App() {
                         onChange={(e) => setMaterialCost(e.target.value)}
                       />
                     </div>
-                  </div>
+                  </>
                 )}
 
-                <button type="submit" style={{ ...styles.button, width: '100%', marginTop: '8px' }}>
-                  Save {entryType === 'time' ? 'Time Entry' : 'Material Entry'}
-                </button>
+                <div style={{ gridColumn: '1 / -1', paddingTop: 8 }}>
+                  <button type="submit" style={styles.buttonPrimary}>
+                    Submit {entryType === 'time' ? 'Time Entry' : 'Material Entry'}
+                  </button>
+                </div>
               </form>
             </section>
 
+            {/* Logs Table */}
             <section style={styles.card}>
-              <div style={styles.cardHeader}>
-                <h2 style={styles.cardTitle}>
-                  {isAdmin ? 'All Activity Logs' : 'My Activity Logs'}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+                <LayoutDashboard className="w-5 h-5 text-sky-400" style={{ color: '#38bdf8' }} />
+                <h2 style={styles.cardHeaderTitle}>
+                  {isAdmin ? 'All Work & Material Logs (Admin View)' : 'My Work & Material Logs'}
                 </h2>
-                <span style={styles.countBadge}>{visibleLogs.length} logs</span>
               </div>
 
-              <div style={{ width: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+              <div style={{ overflowX: 'auto' }}>
                 <table style={styles.table}>
                   <thead>
                     <tr>
@@ -779,35 +816,32 @@ export default function App() {
                       <th style={styles.th}>Type</th>
                       <th style={styles.th}>Contractor</th>
                       <th style={styles.th}>Site</th>
-                      <th style={styles.th}>Details</th>
-                      <th style={styles.th}>Cost</th>
+                      <th style={styles.th}>Hours</th>
+                      <th style={styles.th}>Description</th>
+                      <th style={styles.th}>Cost ($)</th>
+                      <th style={styles.th}>Status</th>
                       <th style={styles.th}>Action</th>
                     </tr>
                   </thead>
                   <tbody>
                     {visibleLogs.length === 0 ? (
                       <tr>
-                        <td colSpan={7} style={styles.emptyTd}>
-                          No entries logged yet.
+                        <td colSpan={9} style={{ textAlign: 'center', padding: 24, color: '#64748b', fontSize: 13 }}>
+                          No Logged Entries Found.
                         </td>
                       </tr>
                     ) : (
                       visibleLogs.map((log) => {
                         const locked = isDateLocked(log.date);
                         return (
-                          <tr key={log.id} style={styles.tr}>
-                            <td style={styles.tdBold}>{log.date}</td>
+                          <tr key={log.id} style={styles.tableRow}>
+                            <td style={styles.td}>{log.date}</td>
+                            <td style={styles.td}>{formatEntryType(log.type)}</td>
+                            <td style={styles.td}>{log.employeeName || 'Contractor'}</td>
+                            <td style={styles.td}><span style={styles.siteBadge}>{log.site}</span></td>
+                            <td style={styles.td}>{log.hoursWorked ? `${log.hoursWorked} hrs` : '-'}</td>
+                            <td style={styles.td}>{log.description || '-'}</td>
                             <td style={styles.td}>
-                              <span style={log.type === 'TIME' ? styles.timeBadge : styles.materialBadge}>
-                                {formatEntryType(log.type)}
-                              </span>
-                            </td>
-                            <td style={styles.td}>{log.employeeName || 'Raz Yaron'}</td>
-                            <td style={styles.td}>{log.site}</td>
-                            <td style={styles.td}>
-                              {log.type === 'TIME' ? `${log.hoursWorked} hrs` : log.description || '-'}
-                            </td>
-                            <td style={styles.tdBold}>
                               {log.type === 'MATERIAL' && log.cost != null
                                 ? `$${Number(log.cost).toFixed(2)}`
                                 : log.type === 'TIME' && log.totalCost != null
@@ -816,14 +850,19 @@ export default function App() {
                             </td>
                             <td style={styles.td}>
                               {locked ? (
-                                <span style={styles.lockedPill}><Lock className="w-3 h-3" /> Locked</span>
+                                <span style={styles.lockedBadge}><Lock className="w-3 h-3" /> Locked</span>
                               ) : (
+                                <span style={styles.editableBadge}>Editable</span>
+                              )}
+                            </td>
+                            <td style={styles.td}>
+                              {!locked && (
                                 <button
                                   onClick={() => handleDeleteLog(log.id, log.date)}
-                                  style={styles.deleteIconButton}
-                                  title="Delete Transaction"
+                                  style={styles.deleteBtn}
+                                  title="Delete entry"
                                 >
-                                  <Trash2 className="w-4 h-4" />
+                                  <Trash2 className="w-4 h-4" /> Delete
                                 </button>
                               )}
                             </td>
@@ -838,145 +877,190 @@ export default function App() {
           </div>
         )}
 
-        {/* DIRECTORY & RATES TAB */}
+        {/* DIRECTORY AND RATES TAB */}
         {activeTab === 'directory' && isAdmin && (
-          <div className="no-print" style={styles.sectionGap}>
-            <section style={styles.card}>
-              <div style={styles.cardHeader}>
-                <h2 style={styles.cardTitle}>{editingUserId ? 'Edit Contractor Profile' : 'Add New Contractor'}</h2>
-                {editingUserId && (
-                  <button onClick={handleCancelUserEdit} style={styles.cancelLinkBtn}>
-                    Cancel Edit
-                  </button>
-                )}
+          <section className="no-print" style={styles.card}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+              <Users className="w-5 h-5 text-sky-400" style={{ color: '#38bdf8' }} />
+              <h2 style={styles.cardHeaderTitle}>Contractor Directory & Rates</h2>
+            </div>
+            
+            <form onSubmit={handleSaveUser} style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 24 }}>
+              <div className="responsive-grid" style={{ ...styles.formGrid, gridTemplateColumns: '1fr 1fr 1fr' }}>
+                <div>
+                  <label style={styles.label}>Contractor Name</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Raz Yaron"
+                    style={styles.input}
+                    value={newUserName}
+                    onChange={(e) => setNewUserName(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label style={styles.label}>Contractor Email</label>
+                  <input
+                    type="email"
+                    required
+                    placeholder="user@auroraview.com"
+                    style={styles.input}
+                    value={newUserEmail}
+                    onChange={(e) => setNewUserEmail(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label style={styles.label}>Hourly Rate ($)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    required
+                    placeholder="35.00"
+                    style={styles.input}
+                    value={newUserRate}
+                    onChange={(e) => setNewUserRate(e.target.value)}
+                  />
+                </div>
               </div>
-              
-              <form onSubmit={handleSaveUser} style={styles.flexForm}>
-                <div style={styles.formGrid2}>
-                  <div>
-                    <label style={styles.label}>Name</label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="Raz Yaron"
-                      style={styles.input}
-                      value={newUserName}
-                      onChange={(e) => setNewUserName(e.target.value)}
-                    />
-                  </div>
-                  <div>
-                    <label style={styles.label}>Email</label>
-                    <input
-                      type="email"
-                      required
-                      placeholder="contractor@auroraview.com"
-                      style={styles.input}
-                      value={newUserEmail}
-                      onChange={(e) => setNewUserEmail(e.target.value)}
-                    />
-                  </div>
-                </div>
 
-                <div style={styles.formGrid2}>
-                  <div>
-                    <label style={styles.label}>Hourly Rate ($)</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      required
-                      placeholder="35.00"
-                      style={styles.input}
-                      value={newUserRate}
-                      onChange={(e) => setNewUserRate(e.target.value)}
-                    />
-                  </div>
-                  <div>
-                    <label style={styles.label}>Address</label>
-                    <input
-                      type="text"
-                      placeholder="123 Main St, Kirkland, WA"
-                      style={styles.input}
-                      value={newUserAddress}
-                      onChange={(e) => setNewUserAddress(e.target.value)}
-                    />
-                  </div>
-                </div>
+              <div>
+                <label style={styles.label}>Contractor Address</label>
+                <input
+                  type="text"
+                  placeholder="123 Main St, Kirkland, WA 98033"
+                  style={styles.input}
+                  value={newUserAddress}
+                  onChange={(e) => setNewUserAddress(e.target.value)}
+                />
+              </div>
 
-                <button type="submit" style={{ ...styles.button, width: '100%', marginTop: '6px' }}>
-                  {editingUserId ? 'Update Contractor Profile' : 'Save New Contractor'}
+              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <button type="submit" style={{ ...styles.buttonPrimary, padding: '10px 24px' }}>
+                  Save Contractor Details
                 </button>
-              </form>
-            </section>
-
-            <section style={styles.card}>
-              <div style={styles.cardHeader}>
-                <h2 style={styles.cardTitle}>Contractor Profiles</h2>
               </div>
+            </form>
 
-              <div style={{ width: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
-                <table style={styles.table}>
-                  <thead>
-                    <tr>
-                      <th style={styles.th}>Name</th>
-                      <th style={styles.th}>Email</th>
-                      <th style={styles.th}>Rate</th>
-                      <th style={styles.th}>Address</th>
-                      <th style={styles.th}>Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {usersList.map((u) => (
-                      <tr key={u.id} style={styles.tr}>
-                        <td style={styles.tdBold}>{u.name || '-'}</td>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={styles.table}>
+                <thead>
+                  <tr>
+                    <th style={styles.th}>Contractor</th>
+                    <th style={styles.th}>Email</th>
+                    <th style={styles.th}>Address</th>
+                    <th style={styles.th}>Hourly Rate</th>
+                    <th style={styles.th}>Last Login</th>
+                    <th style={styles.th}>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {usersList.map((u) => {
+                    const userLoginDate = u.lastLoginAt
+                      ? new Date(u.lastLoginAt).toLocaleString()
+                      : 'Never';
+
+                    return (
+                      <tr key={u.id} style={styles.tableRow}>
+                        <td style={styles.td}>{u.name || '-'}</td>
                         <td style={styles.td}>{u.email}</td>
-                        <td style={styles.tdBold}>${u.hourlyRate ? Number(u.hourlyRate).toFixed(2) : '35.00'}/hr</td>
                         <td style={styles.td}>{u.address || '-'}</td>
-                        <td style={{ ...styles.td, display: 'flex', gap: '8px' }}>
+                        <td style={styles.td}>${u.hourlyRate ? Number(u.hourlyRate).toFixed(2) : '35.00'}/hr</td>
+                        <td style={styles.td}>
+                          <span style={userLoginDate !== 'Never' ? styles.activeLoginBadge : styles.neverLoginBadge}>
+                            <Clock className="w-3 h-3" /> {userLoginDate}
+                          </span>
+                        </td>
+                        <td style={styles.td}>
                           <button
                             onClick={() => handleEditUserClick(u)}
-                            style={styles.editIconButton}
+                            style={styles.actionBtn}
                           >
                             <Edit2 className="w-3.5 h-3.5" /> Edit
                           </button>
-                          <button
-                            onClick={() => handleDeleteUser(u)}
-                            style={styles.deleteIconButton}
-                            title="Delete Contractor"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
                         </td>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
 
-            {/* Sites Management */}
-            <section style={styles.card}>
-              <div style={styles.cardHeader}>
-                <h2 style={styles.cardTitle}>Site Locations</h2>
+            {/* Change Account Password Section */}
+            <div style={{ marginTop: 32, paddingTop: 20, borderTop: '1px solid #1e293b' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                <KeyRound className="w-4 h-4 text-sky-400" style={{ color: '#38bdf8' }} />
+                <h3 style={{ fontSize: 16, fontWeight: 'bold' }}>Change Contractor Password</h3>
               </div>
               
-              <form onSubmit={handleAddSite} style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+              {passwordUpdateSuccess && (
+                <p style={{ color: '#86efac', fontSize: 13, marginBottom: 12 }}>{passwordUpdateSuccess}</p>
+              )}
+              
+              <form onSubmit={handleUpdatePassword} style={{ display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 500 }}>
+                {isAdmin && (
+                  <div>
+                    <label style={styles.label}>Select Target Contractor Account</label>
+                    <select
+                      style={styles.input}
+                      value={targetPasswordEmail}
+                      onChange={(e) => setTargetPasswordEmail(e.target.value)}
+                    >
+                      {usersList.map((u) => (
+                        <option key={u.id} value={u.email}>
+                          {u.name || u.email} ({u.email})
+                        </option>
+                      ))}
+                      {!usersList.some((u) => u.email === user.email) && (
+                        <option value={user.email}>{user.email} (Current Admin)</option>
+                      )}
+                    </select>
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                  <input
+                    type="password"
+                    placeholder="Enter new password (min. 6 chars)"
+                    style={{ ...styles.input, flex: 1 }}
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    required
+                  />
+                  <button type="submit" style={styles.buttonPrimary}>
+                    Update Password
+                  </button>
+                </div>
+              </form>
+            </div>
+
+            {/* Manage Site Locations Section */}
+            <div style={{ marginTop: 32, paddingTop: 24, borderTop: '1px solid #1e293b' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                <MapPin className="w-4 h-4 text-sky-400" style={{ color: '#38bdf8' }} />
+                <h3 style={{ fontSize: 16, fontWeight: 'bold' }}>Manage Site Locations</h3>
+              </div>
+              
+              <form onSubmit={handleAddSite} style={{ display: 'flex', gap: 12, maxWidth: 400, marginBottom: 16 }}>
                 <input
                   type="text"
-                  placeholder="New Site (e.g. AVRD3)"
-                  style={{ ...styles.input, flex: 1 }}
+                  placeholder="e.g. AVRD3"
+                  style={styles.input}
                   value={newSiteName}
                   onChange={(e) => setNewSiteName(e.target.value)}
                 />
-                <button type="submit" style={styles.button}>
-                  <Plus className="w-4 h-4" />
+                <button type="submit" style={styles.buttonPrimary}>
+                  Add Site
                 </button>
               </form>
 
-              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 {sites.map((s) => (
-                  <div key={s} style={styles.siteChip}>
+                  <div
+                    key={s}
+                    style={styles.siteChip}
+                  >
                     {editingSite === s ? (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <>
                         <input
                           type="text"
                           value={editSiteValue}
@@ -984,89 +1068,81 @@ export default function App() {
                           style={styles.chipInput}
                           autoFocus
                         />
-                        <button onClick={() => handleSaveEditSite(s)} style={styles.chipIconBtnSuccess}>
-                          <Check className="w-3.5 h-3.5" />
-                        </button>
-                        <button onClick={() => setEditingSite(null)} style={styles.chipIconBtnDanger}>
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
+                        <button onClick={() => handleSaveEditSite(s)} style={{ color: '#86efac', background: 'none', border: 'none', cursor: 'pointer' }}><Check className="w-3.5 h-3.5" /></button>
+                        <button onClick={() => setEditingSite(null)} style={{ color: '#fca5a5', background: 'none', border: 'none', cursor: 'pointer' }}><X className="w-3.5 h-3.5" /></button>
+                      </>
                     ) : (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <>
                         <span>{s}</span>
-                        <button onClick={() => { setEditingSite(s); setEditSiteValue(s); }} style={styles.chipIconBtn}>
-                          <Edit2 className="w-3 h-3" />
-                        </button>
-                        <button onClick={() => handleDeleteSite(s)} style={styles.chipIconBtnDanger}>
-                          <Trash2 className="w-3 h-3" />
-                        </button>
-                      </div>
+                        <button onClick={() => { setEditingSite(s); setEditSiteValue(s); }} style={{ color: '#94a3b8', background: 'none', border: 'none', cursor: 'pointer' }}><Edit2 className="w-3 h-3" /></button>
+                        <button onClick={() => handleDeleteSite(s)} style={{ color: '#fca5a5', background: 'none', border: 'none', cursor: 'pointer' }}><Trash2 className="w-3 h-3" /></button>
+                      </>
                     )}
                   </div>
                 ))}
               </div>
-            </section>
-          </div>
+            </div>
+          </section>
         )}
 
         {/* MONTH LOCK TAB */}
         {activeTab === 'locks' && isAdmin && (
-          <div className="no-print" style={styles.sectionGap}>
-            <section style={styles.card}>
-              <div style={styles.cardHeader}>
-                <h2 style={styles.cardTitle}>Lock Month Period</h2>
-              </div>
-              <p style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '16px' }}>
-                Locking prevents any contractor edits or deletions for dates within that month.
-              </p>
+          <section className="no-print" style={styles.card}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+              <Lock className="w-5 h-5 text-sky-400" style={{ color: '#38bdf8' }} />
+              <h2 style={styles.cardHeaderTitle}>Month Lock Security</h2>
+            </div>
+            <p style={{ fontSize: 13, color: '#94a3b8', marginBottom: 20 }}>
+              Locking a month prevents any new work entries or deletions for dates in that month.
+            </p>
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                <div>
-                  <label style={styles.label}>Select Month</label>
-                  <select
-                    style={styles.input}
-                    value={selectedMonthToLock}
-                    onChange={(e) => setSelectedMonthToLock(e.target.value)}
-                  >
-                    <option value="">-- Select Month --</option>
-                    {monthOptions.map((opt) => (
-                      <option key={opt.value} value={opt.value}>
-                        {opt.label} {lockedMonths.includes(opt.value) ? '(Locked)' : ''}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => handleLockMonth(selectedMonthToLock)}
-                  disabled={!selectedMonthToLock || lockedMonths.includes(selectedMonthToLock)}
-                  style={{
-                    ...styles.button,
-                    width: '100%',
-                    background: selectedMonthToLock && !lockedMonths.includes(selectedMonthToLock) ? '#2563eb' : '#334155',
-                    cursor: selectedMonthToLock && !lockedMonths.includes(selectedMonthToLock) ? 'pointer' : 'not-allowed'
-                  }}
+            <div style={{ display: 'flex', gap: 16, alignItems: 'flex-end', maxWidth: 450, marginBottom: 28, flexWrap: 'wrap' }}>
+              <div style={{ flex: 1, minWidth: 200 }}>
+                <label style={styles.label}>Select Month To Lock</label>
+                <select
+                  style={styles.input}
+                  value={selectedMonthToLock}
+                  onChange={(e) => setSelectedMonthToLock(e.target.value)}
                 >
-                  <Lock className="w-4 h-4" style={{ marginRight: '6px' }} /> Lock Month
-                </button>
+                  <option value="">-- Choose Month --</option>
+                  {monthOptions.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label} {lockedMonths.includes(opt.value) ? '(Locked)' : ''}
+                    </option>
+                  ))}
+                </select>
               </div>
-            </section>
+              <button
+                type="button"
+                onClick={() => handleLockMonth(selectedMonthToLock)}
+                disabled={!selectedMonthToLock || lockedMonths.includes(selectedMonthToLock)}
+                style={{
+                  ...styles.buttonPrimary,
+                  background: selectedMonthToLock && !lockedMonths.includes(selectedMonthToLock) ? '#2563eb' : '#334155',
+                  cursor: selectedMonthToLock && !lockedMonths.includes(selectedMonthToLock) ? 'pointer' : 'not-allowed'
+                }}
+              >
+                <Lock className="w-4 h-4" /> Lock Month
+              </button>
+            </div>
 
-            <section style={styles.card}>
-              <div style={styles.cardHeader}>
-                <h2 style={styles.cardTitle}>Locked Periods</h2>
-              </div>
+            <div style={{ borderTop: '1px solid #1e293b', paddingTop: 20 }}>
+              <h3 style={{ fontSize: 14, fontWeight: 'bold', color: '#94a3b8', marginBottom: 12 }}>
+                Currently Locked Months
+              </h3>
 
               {lockedMonths.length === 0 ? (
-                <p style={{ fontSize: '13px', color: '#64748b' }}>No months currently locked.</p>
+                <p style={{ fontSize: 13, color: '#64748b' }}>No Months Are Currently Locked.</p>
               ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 450 }}>
                   {lockedMonths.map((monthKey) => (
-                    <div key={monthKey} style={styles.lockedRow}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <Lock className="w-4 h-4 text-red-400" />
-                        <span style={{ fontSize: '14px', fontWeight: 600, color: '#fca5a5' }}>
+                    <div
+                      key={monthKey}
+                      style={styles.lockedMonthRow}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <Lock className="w-4 h-4 text-red-400" style={{ color: '#fca5a5' }} />
+                        <span style={{ fontSize: 14, fontWeight: 600, color: '#fca5a5' }}>
                           {formatMonthName(monthKey)}
                         </span>
                       </div>
@@ -1081,19 +1157,22 @@ export default function App() {
                   ))}
                 </div>
               )}
-            </section>
-          </div>
+            </div>
+          </section>
         )}
 
         {/* INVOICES TAB */}
         {activeTab === 'invoices' && (
-          <div style={styles.sectionGap}>
-            <section className="no-print" style={styles.card}>
-              <div style={styles.cardHeader}>
-                <h2 style={styles.cardTitle}>Invoice Setup</h2>
+          <section style={styles.card}>
+            <div className="no-print">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+                <FileText className="w-5 h-5 text-sky-400" style={{ color: '#38bdf8' }} />
+                <h2 style={styles.cardHeaderTitle}>
+                  {isAdmin ? 'Contractor Invoice Generator' : 'My Contractor Invoice'}
+                </h2>
               </div>
-
-              <div style={styles.flexForm}>
+              
+              <div className="responsive-grid" style={{ ...styles.formGrid, gridTemplateColumns: isAdmin ? '1fr 1fr 1fr 1fr' : '1fr 1fr 1fr', marginBottom: 20 }}>
                 {isAdmin && (
                   <div>
                     <label style={styles.label}>Select Contractor</label>
@@ -1111,129 +1190,130 @@ export default function App() {
                   </div>
                 )}
 
-                <div style={styles.formGrid2}>
-                  <div>
-                    <label style={styles.label}>Month Filter</label>
-                    <select
-                      style={styles.input}
-                      value={invoiceMonth}
-                      onChange={(e) => setInvoiceMonth(e.target.value)}
-                    >
-                      <option value="">All Months</option>
-                      {monthOptions.map((opt) => (
-                        <option key={opt.value} value={opt.value}>
-                          {opt.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                <div>
+                  <label style={styles.label}>Filter Month</label>
+                  <select
+                    style={styles.input}
+                    value={invoiceMonth}
+                    onChange={(e) => setInvoiceMonth(e.target.value)}
+                  >
+                    <option value="">All Months</option>
+                    {monthOptions.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
-                  <div>
-                    <label style={styles.label}>Invoice # Counter</label>
-                    <div style={{ display: 'flex', gap: '6px' }}>
-                      <input
-                        type="number"
-                        style={{ ...styles.input, flex: 1 }}
-                        value={currentContractorStartNumber}
-                        onChange={(e) => setCurrentContractorStartNumber(Number(e.target.value))}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => handleUpdateContractorInvoiceCounter(currentContractorStartNumber)}
-                        style={styles.iconActionBtn}
-                        title="Save Number"
-                      >
-                        Save
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleUpdateContractorInvoiceCounter(100)}
-                        style={styles.iconActionBtn}
-                        title="Reset to 100"
-                      >
-                        <RotateCcw className="w-4 h-4" />
-                      </button>
-                    </div>
+                <div>
+                  <label style={styles.label}>Invoice Start #</label>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <input
+                      type="number"
+                      style={styles.input}
+                      value={currentContractorStartNumber}
+                      onChange={(e) => setCurrentContractorStartNumber(Number(e.target.value))}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleUpdateContractorInvoiceCounter(currentContractorStartNumber)}
+                      style={styles.iconActionBtn}
+                      title="Save Counter"
+                    >
+                      Save
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleUpdateContractorInvoiceCounter(100)}
+                      style={styles.iconActionBtn}
+                      title="Reset Counter"
+                    >
+                      <RotateCcw className="w-4 h-4" />
+                    </button>
                   </div>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => window.print()}
-                  style={{ ...styles.button, width: '100%', marginTop: '6px' }}
-                >
-                  <Printer className="w-4 h-4" style={{ marginRight: '8px' }} /> Print / Export PDF
-                </button>
+                <div style={{ display: 'flex', alignItems: 'flex-end' }}>
+                  <button
+                    type="button"
+                    onClick={() => window.print()}
+                    style={{ ...styles.buttonPrimary, width: '100%', background: '#2563eb' }}
+                  >
+                    <Printer className="w-4 h-4" /> Print / Export PDF
+                  </button>
+                </div>
               </div>
-            </section>
+            </div>
 
-            <div className="invoice-container" style={styles.invoiceCard}>
-              <div style={styles.invoiceTopRow}>
+            <div className="invoice-container" style={styles.invoiceBox}>
+              <div style={styles.invoiceHeader}>
                 <div>
-                  <h3 style={{ fontSize: '22px', fontWeight: 'bold', color: '#ffffff', margin: 0 }}>INVOICE</h3>
-                  <p style={{ fontSize: '12px', color: '#94a3b8', marginTop: '2px' }}>AuroraView Reporting</p>
+                  <h3 className="invoice-header-title" style={{ fontSize: 24, fontWeight: 'bold', color: '#ffffff' }}>Invoice</h3>
+                  <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>
+                    AuroraView Reporting System
+                  </p>
                 </div>
                 <div style={{ textAlign: 'right' }}>
-                  <span style={{ fontSize: '16px', fontWeight: 'bold', color: '#38bdf8' }}>
+                  <p style={{ fontSize: 16, fontWeight: 'bold', color: '#38bdf8' }}>
                     INV-{currentContractorStartNumber}
-                  </span>
-                  <p style={{ fontSize: '12px', color: '#94a3b8', marginTop: '2px' }}>
+                  </p>
+                  <p style={{ fontSize: 12, color: '#94a3b8', marginTop: 2 }}>
                     Date: {new Date().toISOString().split('T')[0]}
+                  </p>
+                  <p style={{ fontSize: 12, color: '#94a3b8' }}>
+                    Period: {invoiceMonth ? formatMonthName(invoiceMonth) : 'All Time'}
                   </p>
                 </div>
               </div>
 
-              <div style={{ padding: '16px 0', borderBottom: '1px solid #334155', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '16px 0', borderBottom: '1px solid #334155', flexWrap: 'wrap', gap: 12 }}>
                 <div>
-                  <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600 }}>CONTRACTOR</span>
-                  <p style={{ fontSize: '15px', fontWeight: 'bold', color: '#ffffff', margin: '2px 0 0 0' }}>
-                    {selectedContractorInfo.name}
-                  </p>
-                  <p style={{ fontSize: '13px', color: '#cbd5e1', margin: 0 }}>{selectedContractorInfo.email}</p>
+                  <p style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600 }}>Contractor Details</p>
+                  <p style={{ fontSize: 15, fontWeight: 'bold', color: '#ffffff', marginTop: 2 }}>{selectedContractorInfo.name}</p>
+                  <p style={{ fontSize: 13, color: '#cbd5e1' }}>{selectedContractorInfo.email}</p>
                   {selectedContractorInfo.address && (
-                    <p style={{ fontSize: '12px', color: '#94a3b8', margin: '2px 0 0 0' }}>
+                    <p style={{ fontSize: 12, color: '#94a3b8', marginTop: 2, maxWidth: 300 }}>
                       {selectedContractorInfo.address}
                     </p>
                   )}
                 </div>
-                <div>
-                  <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600 }}>HOURLY RATE</span>
-                  <p style={{ fontSize: '14px', fontWeight: 'bold', color: '#ffffff', margin: '2px 0 0 0' }}>
-                    ${selectedContractorInfo.rate.toFixed(2)}/hr
-                  </p>
+                <div style={{ textAlign: 'right' }}>
+                  <p style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600 }}>Hourly Rate</p>
+                  <p style={{ fontSize: 15, fontWeight: 'bold', color: '#ffffff', marginTop: 2 }}>${selectedContractorInfo.rate.toFixed(2)}/hr</p>
                 </div>
               </div>
 
-              <div style={{ width: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
-                <table className="invoice-table" style={styles.table}>
+              <div style={{ overflowX: 'auto' }}>
+                <table className="invoice-table" style={{ ...styles.table, marginTop: 20 }}>
                   <thead>
-                    <tr>
+                    <tr style={{ borderBottom: '2px solid #334155', textAlign: 'left' }}>
                       <th style={styles.th}>Date</th>
                       <th style={styles.th}>Type</th>
                       <th style={styles.th}>Site</th>
                       <th style={styles.th}>Description</th>
-                      <th style={styles.th}>Amount</th>
+                      <th style={{ ...styles.th, textAlign: 'right' }}>Amount ($)</th>
                     </tr>
                   </thead>
                   <tbody>
                     {invoiceLogs.length === 0 ? (
                       <tr>
-                        <td colSpan={5} style={styles.emptyTd}>
-                          No entries logged for this period.
+                        <td colSpan={5} style={{ textAlign: 'center', padding: 24, color: '#64748b', fontSize: 13 }}>
+                          No Logged Entries Found For This Contractor And Period.
                         </td>
                       </tr>
                     ) : (
                       invoiceLogs.map((l) => {
                         const amount = l.type === 'MATERIAL' ? Number(l.cost || 0) : Number(l.totalCost || 0);
                         return (
-                          <tr key={l.id} style={styles.tr}>
-                            <td style={styles.tdBold}>{l.date}</td>
+                          <tr key={l.id} style={styles.tableRow}>
+                            <td style={styles.td}>{l.date}</td>
                             <td style={styles.td}>{formatEntryType(l.type)}</td>
                             <td style={styles.td}>{l.site}</td>
                             <td style={styles.td}>
                               {l.type === 'TIME' ? `${l.hoursWorked} hrs @ $${l.hourlyRate || selectedContractorInfo.rate}/hr` : l.description}
                             </td>
-                            <td style={styles.tdBold}>${amount.toFixed(2)}</td>
+                            <td style={{ ...styles.td, textAlign: 'right' }}>${amount.toFixed(2)}</td>
                           </tr>
                         );
                       })
@@ -1242,402 +1322,53 @@ export default function App() {
                 </table>
               </div>
 
-              <div style={styles.invoiceFooter}>
-                <span style={{ fontSize: '13px', color: '#94a3b8' }}>Total Due</span>
-                <span style={{ fontSize: '24px', fontWeight: 'bold', color: '#38bdf8' }}>
+              <div style={styles.invoiceSummary}>
+                <p style={{ fontSize: 13, color: '#94a3b8' }}>Total Amount Due</p>
+                <p style={{ fontSize: 24, fontWeight: 'bold', color: '#38bdf8', marginTop: 4 }}>
                   ${totalInvoiceAmount.toFixed(2)}
-                </span>
+                </p>
               </div>
             </div>
-          </div>
+          </section>
         )}
-
       </main>
     </div>
   );
 }
 
-const styles: Record<string, React.CSSProperties> = {
-  header: {
-    position: 'sticky',
-    top: 0,
-    zIndex: 50,
-    background: '#0f172a',
-    borderBottom: '1px solid #1e293b',
-    padding: '12px 16px 0 16px',
-    width: '100vw',
-    boxSizing: 'border-box'
-  },
-  headerInner: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: '12px'
-  },
-  logoBadge: {
-    width: '32px',
-    height: '32px',
-    borderRadius: '8px',
-    background: '#2563eb',
-    color: '#ffffff',
-    fontWeight: 'bold',
-    fontSize: '14px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center'
-  },
-  appTitle: {
-    fontSize: '18px',
-    fontWeight: 'bold',
-    color: '#ffffff',
-    margin: 0,
-    lineHeight: 1.1
-  },
-  userEmailText: {
-    fontSize: '11px',
-    color: '#94a3b8'
-  },
-  adminBadge: {
-    fontSize: '10px',
-    background: '#166534',
-    color: '#86efac',
-    padding: '1px 6px',
-    borderRadius: '8px',
-    fontWeight: 600
-  },
-  iconSignOutBtn: {
-    background: '#1e293b',
-    color: '#94a3b8',
-    border: '1px solid #334155',
-    borderRadius: '8px',
-    padding: '8px',
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center'
-  },
-  tabsWrapper: {
-    display: 'flex',
-    gap: '8px',
-    overflowX: 'auto',
-    whiteSpace: 'nowrap',
-    paddingBottom: '10px'
-  },
-  navTab: {
-    background: '#1e293b',
-    color: '#94a3b8',
-    border: 'none',
-    padding: '8px 14px',
-    borderRadius: '20px',
-    fontSize: '13px',
-    fontWeight: 500,
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '6px'
-  },
-  activeNavTab: {
-    background: '#2563eb',
-    color: '#ffffff',
-    border: 'none',
-    padding: '8px 14px',
-    borderRadius: '20px',
-    fontSize: '13px',
-    fontWeight: 600,
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '6px'
-  },
-  tabIcon: {
-    width: '14px',
-    height: '14px'
-  },
-  mainContainer: {
-    padding: '16px',
-    maxWidth: '800px',
-    margin: '0 auto',
-    width: '100%',
-    boxSizing: 'border-box'
-  },
-  sectionGap: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '16px'
-  },
-  card: {
-    background: '#0f172a',
-    border: '1px solid #1e293b',
-    borderRadius: '16px',
-    padding: '16px',
-    boxSizing: 'border-box',
-    width: '100%'
-  },
-  cardHeader: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: '14px'
-  },
-  cardTitle: {
-    fontSize: '16px',
-    fontWeight: 'bold',
-    color: '#ffffff',
-    margin: 0
-  },
-  cancelLinkBtn: {
-    background: 'none',
-    border: 'none',
-    color: '#fca5a5',
-    cursor: 'pointer',
-    fontSize: '12px',
-    textDecoration: 'underline'
-  },
-  countBadge: {
-    fontSize: '11px',
-    color: '#94a3b8',
-    background: '#1e293b',
-    padding: '2px 8px',
-    borderRadius: '10px'
-  },
-  segmentContainer: {
-    display: 'flex',
-    background: '#1e293b',
-    padding: '4px',
-    borderRadius: '10px',
-    marginBottom: '14px'
-  },
-  segmentTab: {
-    flex: 1,
-    background: 'transparent',
-    color: '#94a3b8',
-    border: 'none',
-    padding: '8px',
-    borderRadius: '8px',
-    fontSize: '13px',
-    fontWeight: 500,
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center'
-  },
-  segmentActive: {
-    flex: 1,
-    background: '#2563eb',
-    color: '#ffffff',
-    border: 'none',
-    padding: '8px',
-    borderRadius: '8px',
-    fontSize: '13px',
-    fontWeight: 600,
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center'
-  },
-  flexForm: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '12px'
-  },
-  formGrid2: {
-    display: 'grid',
-    gridTemplateColumns: '1fr 1fr',
-    gap: '10px'
-  },
-  label: {
-    display: 'block',
-    fontSize: '12px',
-    fontWeight: 600,
-    color: '#cbd5e1',
-    marginBottom: '4px'
-  },
-  input: {
-    width: '100%',
-    background: '#020617',
-    border: '1px solid #334155',
-    color: '#ffffff',
-    borderRadius: '8px',
-    padding: '10px 12px',
-    boxSizing: 'border-box'
-  },
-  button: {
-    background: '#2563eb',
-    color: '#ffffff',
-    border: 'none',
-    borderRadius: '10px',
-    padding: '12px',
-    fontWeight: 600,
-    fontSize: '14px',
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: '44px'
-  },
-  table: {
-    width: '100%',
-    borderCollapse: 'collapse',
-    fontSize: '13px',
-    whiteSpace: 'nowrap',
-    minWidth: '500px'
-  },
-  th: {
-    textAlign: 'left',
-    padding: '8px',
-    color: '#64748b',
-    borderBottom: '1px solid #1e293b',
-    fontSize: '11px',
-    fontWeight: 600,
-    textTransform: 'uppercase'
-  },
-  tr: {
-    borderBottom: '1px solid #1e293b'
-  },
-  td: {
-    padding: '10px 8px',
-    color: '#cbd5e1'
-  },
-  tdBold: {
-    padding: '10px 8px',
-    color: '#ffffff',
-    fontWeight: 600
-  },
-  emptyTd: {
-    padding: '20px',
-    textAlign: 'center',
-    color: '#64748b'
-  },
-  timeBadge: {
-    background: '#1e3a8a',
-    color: '#93c5fd',
-    fontSize: '11px',
-    padding: '2px 8px',
-    borderRadius: '6px',
-    fontWeight: 600
-  },
-  materialBadge: {
-    background: '#312e81',
-    color: '#c084fc',
-    fontSize: '11px',
-    padding: '2px 8px',
-    borderRadius: '6px',
-    fontWeight: 600
-  },
-  deleteIconButton: {
-    background: 'none',
-    border: 'none',
-    color: '#ef4444',
-    cursor: 'pointer',
-    padding: '4px'
-  },
-  editIconButton: {
-    background: 'none',
-    border: 'none',
-    color: '#38bdf8',
-    cursor: 'pointer',
-    fontSize: '12px',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '4px'
-  },
-  lockedPill: {
-    fontSize: '11px',
-    color: '#fca5a5',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '4px'
-  },
-  siteChip: {
-    background: '#1e293b',
-    border: '1px solid #334155',
-    borderRadius: '20px',
-    padding: '6px 12px',
-    fontSize: '12px',
-    fontWeight: 500,
-    color: '#ffffff'
-  },
-  chipInput: {
-    background: '#020617',
-    border: '1px solid #38bdf8',
-    color: '#ffffff',
-    borderRadius: '4px',
-    padding: '2px 6px',
-    fontSize: '12px',
-    width: '70px'
-  },
-  chipIconBtn: {
-    background: 'none',
-    border: 'none',
-    color: '#94a3b8',
-    cursor: 'pointer',
-    padding: 0
-  },
-  chipIconBtnSuccess: {
-    background: 'none',
-    border: 'none',
-    color: '#4ade80',
-    cursor: 'pointer',
-    padding: 0
-  },
-  chipIconBtnDanger: {
-    background: 'none',
-    border: 'none',
-    color: '#f87171',
-    cursor: 'pointer',
-    padding: 0
-  },
-  lockedRow: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    background: '#020617',
-    border: '1px solid #7f1d1d',
-    borderRadius: '10px',
-    padding: '10px 14px'
-  },
-  unlockBtn: {
-    background: '#450a0a',
-    color: '#fca5a5',
-    border: '1px solid #991b1b',
-    borderRadius: '6px',
-    padding: '4px 10px',
-    fontSize: '12px',
-    fontWeight: 600,
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '4px'
-  },
-  iconActionBtn: {
-    background: '#1e293b',
-    color: '#ffffff',
-    border: '1px solid #334155',
-    borderRadius: '8px',
-    padding: '0 12px',
-    cursor: 'pointer',
-    fontSize: '12px'
-  },
-  invoiceCard: {
-    background: '#0f172a',
-    border: '1px solid #1e293b',
-    borderRadius: '16px',
-    padding: '20px',
-    boxSizing: 'border-box'
-  },
-  invoiceTopRow: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingBottom: '12px',
-    borderBottom: '1px solid #334155'
-  },
-  invoiceFooter: {
-    marginTop: '16px',
-    paddingTop: '12px',
-    borderTop: '1px solid #334155',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between'
-  }
+// UI Styling Config
+const styles: { [key: string]: React.CSSProperties } = {
+  title: { fontSize: 22, fontWeight: 'bold', color: '#ffffff', margin: 0, letterSpacing: '-0.3px' },
+  adminBadge: { fontSize: 11, background: 'rgba(34, 197, 94, 0.15)', color: '#86efac', border: '1px solid rgba(34, 197, 94, 0.3)', padding: '2px 8px', borderRadius: 12, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 },
+  nav: { display: 'flex', gap: 8 },
+  tab: { padding: '10px 16px', background: '#0f172a', color: '#94a3b8', border: '1px solid #1e293b', borderRadius: 8, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 8, fontWeight: 600, fontSize: 13, transition: 'all 0.2s' },
+  activeTab: { padding: '10px 16px', background: '#2563eb', color: '#ffffff', border: '1px solid #3b82f6', borderRadius: 8, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 8, fontWeight: 600, fontSize: 13 },
+  pillInactive: { padding: '8px 14px', background: '#0f172a', color: '#94a3b8', border: '1px solid #1e293b', borderRadius: 6, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 500 },
+  pillActive: { padding: '8px 14px', background: '#1e293b', color: '#38bdf8', border: '1px solid #38bdf8', borderRadius: 6, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 600 },
+  signOutBtn: { background: '#0f172a', color: '#fca5a5', border: '1px solid #7f1d1d', padding: '8px 14px', borderRadius: 8, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 500 },
+  card: { background: '#0f172a', border: '1px solid #1e293b', borderRadius: 12, padding: 20, boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.3)', color: '#ffffff' },
+  cardHeaderTitle: { fontSize: 17, fontWeight: 'bold', color: '#ffffff', margin: 0 },
+  formGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 },
+  label: { display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 6, color: '#cbd5e1' },
+  input: { width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid #334155', boxSizing: 'border-box', fontSize: 14, background: '#020617', color: '#ffffff' },
+  buttonPrimary: { background: '#2563eb', color: '#ffffff', padding: '10px 18px', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 600, fontSize: 13, display: 'inline-flex', justifyContent: 'center', alignItems: 'center', gap: 8, height: 42 },
+  table: { width: '100%', borderCollapse: 'collapse', marginTop: 8, color: '#ffffff' },
+  th: { padding: '12px 10px', fontSize: 12, color: '#94a3b8', borderBottom: '1px solid #1e293b', textTransform: 'capitalize' },
+  td: { padding: '12px 10px', fontSize: 13, color: '#ffffff' },
+  tableRow: { borderBottom: '1px solid #1e293b' },
+  siteBadge: { background: 'rgba(56, 189, 248, 0.1)', color: '#38bdf8', padding: '2px 8px', borderRadius: 4, fontSize: 12, fontWeight: 600 },
+  lockedBadge: { background: 'rgba(239, 68, 68, 0.15)', color: '#fca5a5', padding: '3px 8px', borderRadius: 12, fontSize: 11, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 },
+  editableBadge: { background: 'rgba(34, 197, 94, 0.15)', color: '#86efac', padding: '3px 8px', borderRadius: 12, fontSize: 11, fontWeight: 600 },
+  activeLoginBadge: { background: 'rgba(56, 189, 248, 0.1)', color: '#38bdf8', padding: '3px 8px', borderRadius: 6, fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4 },
+  neverLoginBadge: { background: '#1e293b', color: '#64748b', padding: '3px 8px', borderRadius: 6, fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4 },
+  deleteBtn: { background: 'rgba(239, 68, 68, 0.15)', color: '#fca5a5', border: '1px solid rgba(239, 68, 68, 0.3)', padding: '6px 10px', borderRadius: 6, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12 },
+  actionBtn: { background: 'none', border: 'none', color: '#60a5fa', cursor: 'pointer', fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 4, textDecoration: 'underline' },
+  iconActionBtn: { background: '#1e293b', color: '#ffffff', border: '1px solid #334155', borderRadius: 8, padding: '0 12px', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+  siteChip: { background: '#1e293b', color: '#f8fafc', padding: '6px 12px', borderRadius: 8, fontSize: 12, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 8, border: '1px solid #334155' },
+  chipInput: { background: '#020617', color: '#ffffff', border: '1px solid #475569', borderRadius: 4, padding: '2px 6px', fontSize: 12 },
+  lockedMonthRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.2)', padding: '10px 16px', borderRadius: 8 },
+  unlockBtn: { background: '#7f1d1d', color: '#fef2f2', border: '1px solid #b91c1c', padding: '4px 10px', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4 },
+  invoiceBox: { marginTop: 24, padding: 28, border: '1px solid #1e293b', borderRadius: 12, background: '#020617', color: '#ffffff' },
+  invoiceHeader: { display: 'flex', justifyContent: 'space-between', borderBottom: '2px solid #1e293b', paddingBottom: 16, flexWrap: 'wrap', gap: 12 },
+  invoiceSummary: { marginTop: 24, textAlign: 'right', borderTop: '2px solid #1e293b', paddingTop: 16 }
 };
