@@ -1,0 +1,9 @@
+/* Force all table headers and labels across the app to use Title Case */
+th, label, h1, h2, h3, .uppercase {
+  text-transform: capitalize !important;
+  font-variant: normal !important;
+}/* Force all table headers and labels across the app to use Title Case */
+th, label, h1, h2, h3, .uppercase {
+  text-transform: capitalize !important;
+  font-variant: normal !important;
+}
