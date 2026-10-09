@@ -1,0 +1,57 @@
+/* Mobile Screen Layout & Overflow Fixes */
+html, body {
+  width: 100%;
+  max-width: 100vw;
+  overflow-x: hidden;
+  margin: 0;
+  padding: 0;
+  background-color: #020617;
+  color: #f8fafc;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#root {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* Make inputs, dropdowns, and buttons mobile-friendly (prevents iOS zoom on focus) */
+input, select, textarea, button {
+  font-size: 16px !important;
+  box-sizing: border-box;
+}
+
+/* Responsive Table Wrapper for Mobile */
+.table-container {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+table {
+  width: 100%;
+  white-space: nowrap;
+}
+
+/* Mobile Adjustments for Cards and Containers */
+@media (max-width: 640px) {
+  body {
+    padding: 0px;
+  }
+
+  /* Reduce padding on mobile wrappers */
+  .p-6, .p-8 {
+    padding: 1rem !important;
+  }
+
+  /* Stack header elements vertically on small screens */
+  .mobile-stack {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 0.75rem !important;
+  }
+}

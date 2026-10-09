@@ -1,0 +1,98 @@
+rules_version = '2';
+
+// AuroraView Firestore Security Rules
+// Deploy these in the Firebase Console under Firestore > Rules
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // --- Helper functions ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && request.auth.token.email == 'razy@auroraview.com';
+    }
+
+    function isOwner(userEmail) {
+      return isSignedIn() && request.auth.token.email == userEmail;
+    }
+
+    // --- logs ---
+    // Admin can read all; users can read their own logs
+    // Admin can write any; users can only create/update their own logs
+    // No writes allowed if the log's month is locked
+    match /logs/{logId} {
+      allow read: if isAdmin() || (isSignedIn() && resource.data.userEmail == request.auth.token.email);
+
+      allow create: if isAdmin() || (
+        isSignedIn() &&
+        request.resource.data.userEmail == request.auth.token.email
+      );
+
+      allow update: if isAdmin() || (
+        isSignedIn() &&
+        resource.data.userEmail == request.auth.token.email &&
+        request.resource.data.userEmail == resource.data.userEmail
+      );
+
+      allow delete: if isAdmin();
+    }
+
+    // --- users ---
+    // Admin can read/write all user profiles
+    // Users can read their own profile and update only their lastLogin
+    match /users/{userId} {
+      allow read: if isAdmin() || (isSignedIn() && resource.data.email == request.auth.token.email);
+
+      // Allow creating/updating only own profile
+      allow create: if isAdmin() || (
+        isSignedIn() &&
+        request.resource.data.email == request.auth.token.email
+      );
+
+      // Users can only update their lastLogin field; admin can update everything
+      allow update: if isAdmin() || (
+        isSignedIn() &&
+        resource.data.email == request.auth.token.email &&
+        request.resource.data diff resource.data affectedKeys() == ['lastLogin']
+      );
+
+      allow delete: if isAdmin();
+    }
+
+    // --- lockedMonths ---
+    // Admin-only writes; all signed-in users can read
+    match /lockedMonths/{monthKey} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // --- sites ---
+    // Admin-only writes; all signed-in users can read
+    match /sites/{siteId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // --- workTypes ---
+    // Admin-only writes; all signed-in users can read
+    match /workTypes/{workTypeId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // --- settings ---
+    // Admin-only writes; all signed-in users can read
+    match /settings/{settingId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

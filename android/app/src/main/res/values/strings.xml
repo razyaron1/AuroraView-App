@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">AuroraView</string>
+    <string name="title_activity_main">AuroraView</string>
+    <string name="package_name">com.auroraview.app</string>
+    <string name="custom_url_scheme">com.auroraview.app</string>
+</resources>
